@@ -2,6 +2,7 @@ import "@shopify/shopify-app-react-router/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
+  DeliveryMethod,
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
@@ -19,6 +20,42 @@ const shopify = shopifyApp({
   future: {
     expiringOfflineAccessTokens: true,
   },
+
+  webhooks: {
+    ORDERS_CREATE: {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: "/webhooks/app/orders_create",
+    },
+    APP_UNINSTALLED: {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: "/webhooks/app/uninstalled",
+    },
+    // GDPR webhooks (customers/data_request, customers/redact, shop/redact)
+    // are mandatory privacy webhooks — configure their URLs in:
+    // Partner Dashboard → App → Data protection
+  },
+
+  hooks: {
+    afterAuth: async ({ session }) => {
+      // Register all webhooks after every OAuth install/reinstall
+      shopify.registerWebhooks({ session });
+
+      // Upsert the shop record
+      const shop = await prisma.shop.upsert({
+        where: { domain: session.shop },
+        update: { isActive: true },
+        create: { domain: session.shop },
+      });
+
+      // Seed default delivery settings on first install
+      await prisma.deliverySettings.upsert({
+        where: { shopId: shop.id },
+        update: {},
+        create: { shopId: shop.id },
+      });
+    },
+  },
+
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),

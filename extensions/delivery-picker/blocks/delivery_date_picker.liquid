@@ -1,0 +1,224 @@
+{% comment %}
+  Delivery Date Picker — Theme App Extension Block
+  Add this block to any cart or product page section that contains an
+  Add-to-cart form. The date value is stored as a line-item property so
+  it persists to the Shopify order automatically.
+{% endcomment %}
+
+{%- assign proxy_url = shop.url | append: '/apps/delivery?shop=' | append: shop.permanent_domain -%}
+
+<div
+  id="ddp-root"
+  data-proxy="{{ proxy_url }}"
+  data-enabled="false"
+  style="margin: 16px 0;"
+>
+  <div id="ddp-inner" style="display: none;">
+
+    <div style="margin-bottom: 16px;">
+      <label
+        for="ddp-date"
+        style="display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px;"
+      >
+        {{ block.settings.label | default: 'Choose a Delivery Date' }}
+        <span style="color: #e02020;" aria-hidden="true"> *</span>
+      </label>
+
+      {% comment %}
+        CRITICAL — name must be exactly properties[Delivery Date]
+        This is the only format Shopify persists to the order line item.
+        Do NOT change the name attribute.
+      {% endcomment %}
+      <input
+        type="date"
+        id="ddp-date"
+        name="properties[Delivery Date]"
+        required
+        aria-required="true"
+        style="
+          padding: 8px 12px;
+          border: 1px solid #c9cccf;
+          border-radius: 4px;
+          font-size: 14px;
+          line-height: 1.5;
+          width: 100%;
+          max-width: 220px;
+          box-sizing: border-box;
+        "
+      />
+
+      <p
+        id="ddp-error"
+        role="alert"
+        style="color: #e02020; font-size: 13px; margin-top: 6px; display: none;"
+      ></p>
+    </div>
+
+    {% if block.settings.show_gift_message %}
+    <div style="margin-bottom: 16px;">
+      <label
+        for="ddp-gift"
+        style="display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px;"
+      >
+        {{ block.settings.gift_label | default: 'Gift Message' }}
+        <span style="color: #6d7175; font-weight: 400;"> (optional)</span>
+      </label>
+      <textarea
+        id="ddp-gift"
+        name="properties[Gift Message]"
+        rows="3"
+        maxlength="200"
+        placeholder="{{ block.settings.gift_placeholder | default: 'Write your personal message here…' }}"
+        style="
+          width: 100%;
+          max-width: 400px;
+          padding: 8px 12px;
+          border: 1px solid #c9cccf;
+          border-radius: 4px;
+          font-size: 14px;
+          resize: vertical;
+          box-sizing: border-box;
+        "
+      ></textarea>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+<script>
+(function () {
+  var root  = document.getElementById('ddp-root');
+  var inner = document.getElementById('ddp-inner');
+  var input = document.getElementById('ddp-date');
+  var err   = document.getElementById('ddp-error');
+
+  function addDays(d, n) {
+    var r = new Date(d);
+    r.setDate(r.getDate() + n);
+    return r;
+  }
+
+  function fmt(d) {
+    return d.toISOString().split('T')[0];
+  }
+
+  function showError(msg) {
+    err.textContent = msg;
+    err.style.display = 'block';
+    input.value = '';
+    input.setAttribute('aria-invalid', 'true');
+  }
+
+  function hideError() {
+    err.style.display = 'none';
+    input.removeAttribute('aria-invalid');
+  }
+
+  function isBlackedOut(dateStr, config) {
+    if ((config.blackoutDates || []).indexOf(dateStr) !== -1) return 'blackout-date';
+    var dow = new Date(dateStr + 'T00:00:00').getDay();
+    if ((config.blackoutWeekdays || []).indexOf(dow) !== -1) return 'blackout-weekday';
+    return null;
+  }
+
+  function applyConfig(config) {
+    if (!config.enabled) {
+      root.style.display = 'none';
+      return;
+    }
+
+    var today = new Date();
+    var lead  = config.leadTimeDays || 1;
+
+    // Cutoff time pushes lead by +1 if the order is placed after it
+    if (config.cutoffTime) {
+      var parts   = config.cutoffTime.split(':').map(Number);
+      var nowMins = today.getHours() * 60 + today.getMinutes();
+      var cutMins = parts[0] * 60 + (parts[1] || 0);
+      if (nowMins >= cutMins) lead += 1;
+    }
+
+    var minDate = addDays(today, lead);
+    var maxDate = addDays(today, config.maxDaysAhead || 30);
+
+    input.min = fmt(minDate);
+    input.max = fmt(maxDate);
+
+    // Show the widget now that config is loaded
+    inner.style.display = 'block';
+
+    input.addEventListener('change', function () {
+      hideError();
+      var val    = input.value;
+      var reason = isBlackedOut(val, config);
+
+      if (reason === 'blackout-date') {
+        showError('{{ block.settings.error_blackout | default: "This date is unavailable. Please choose another." }}');
+        return;
+      }
+      if (reason === 'blackout-weekday') {
+        showError('{{ block.settings.error_weekday | default: "We do not deliver on that day. Please choose another date." }}');
+        return;
+      }
+    });
+  }
+
+  fetch(root.dataset.proxy)
+    .then(function (r) {
+      if (!r.ok) throw new Error('non-200');
+      return r.json();
+    })
+    .then(applyConfig)
+    .catch(function () {
+      // If config can't be loaded, show a basic picker without restrictions
+      inner.style.display = 'block';
+      console.warn('[delivery-picker] Could not load config — showing unconfigured picker.');
+    });
+})();
+</script>
+
+{% schema %}
+{
+  "name": "Delivery Date Picker",
+  "target": "section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "label",
+      "label": "Date picker label",
+      "default": "Choose a Delivery Date"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_gift_message",
+      "label": "Show gift message field",
+      "default": false
+    },
+    {
+      "type": "text",
+      "id": "gift_label",
+      "label": "Gift message label",
+      "default": "Gift Message"
+    },
+    {
+      "type": "text",
+      "id": "gift_placeholder",
+      "label": "Gift message placeholder",
+      "default": "Write your personal message here…"
+    },
+    {
+      "type": "text",
+      "id": "error_blackout",
+      "label": "Error: blackout date",
+      "default": "This date is unavailable. Please choose another."
+    },
+    {
+      "type": "text",
+      "id": "error_weekday",
+      "label": "Error: unavailable weekday",
+      "default": "We do not deliver on that day. Please choose another date."
+    }
+  ]
+}
+{% endschema %}

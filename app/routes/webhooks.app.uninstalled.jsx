@@ -6,11 +6,16 @@ export const action = async ({ request }) => {
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
-  // Webhook requests can trigger multiple times and after an app has already been uninstalled.
-  // If this webhook already ran, the session may have been deleted previously.
+  // Webhook can fire multiple times; session may already be gone on a repeat.
   if (session) {
     await db.session.deleteMany({ where: { shop } });
   }
+
+  // Mark shop inactive — preserves delivery data for GDPR compliance window.
+  await db.shop.updateMany({
+    where: { domain: shop },
+    data: { isActive: false },
+  });
 
   return new Response();
 };
